@@ -4,8 +4,36 @@
 # instances of the same course. 
 #
 # maybe a toggle to set/unset a course favorite status?
-
+from dataclasses import dataclass
 from InquirerPy import inquirer
+import requests
+
+def get_course_list(category):
+    courses = []
+    if category == 'all':
+        # pull all courses where the user has a teacher role
+        url = f'{base_url}/courses/?page=1&per_page=200'
+    elif category == 'favorites':
+        # pull all courses pinned to the users main page
+        url = f'{base_url}/users/self/favorites/courses'
+    course_json = requests.get(url, headers=header).json()
+    
+    courses = [
+        f'{c["id"]}:{c["name"]}:{str(c["start_at"] or "")[:10]}'
+        for c in course_json
+        if c.get('enrollments') and c['enrollments'][0].get('type') == 'teacher'
+    ]
+    # sorts them so they show up in alphabetical order. Array is [courseid:name:date]
+    courses.sort(key=lambda c: c.split(':')[1].strip())
+    return courses
+
+with open('creds/token.crd') as file:
+    token = file.read().strip()
+base_url = 'https://hv.instructure.com/api/v1'
+header = {"Authorization":f"Bearer {token}"}
+
+stuff = get_course_list('favorites')
+print(stuff)
 
 class Menu:
     def __init__(self):
