@@ -6,7 +6,18 @@
 # maybe a toggle to set/unset a course favorite status?
 from dataclasses import dataclass, field
 from InquirerPy import inquirer
-import requests
+from InquirerPy.validator import NumberValidator as numVal
+import requests, os
+
+def init_auth(credentials='creds/token.crd'):
+    try:
+        os.path.isfile(credentials) and os.stat(credentials).st_size >= 10
+        with open(credentials) as file:
+            token = file.read().strip()
+        return token
+    except:
+        print('Token missing! Cannot access Canvas LMS without it!')
+        raise SystemExit
 
 @dataclass
 class Res:
@@ -14,6 +25,9 @@ class Res:
     course_name: str = ''
     course_date: str = ''
     courses: list = field(default_factory=list)
+    w_base_url: str = 'https://hv.instructure.com/api/v1'
+    w_token: str = init_auth()
+    w_header = {"Authorization":f"Bearer {w_token}"}
 
 class Menu:
     def __init__(self):
@@ -25,8 +39,12 @@ class Menu:
                 self.main_menu(res)
             elif self.state == 'course_main_menu':
                 self.course_main_menu(res)
+            elif self.state == 'pick_course':
+                self.pick_course_menu(res)
             elif self.state == 'student_main_menu':
                 self.student_main_menu(res)
+            elif self.state == 'submit_course_id':
+                self.submit_course_id(res)
 
     def main_menu(self, res):
         choice = inquirer.select(
@@ -56,6 +74,20 @@ class Menu:
         elif choice == 'Quit':
             raise SystemExit
         
+    def pick_course_menu(self, res):
+        choice = inquirer.select(
+            message='Course category: ',
+            choices=['All', 'Favorites', 'Back', 'Quit'],
+            default='Favorites',
+        ).execute()
+        if choice == 'Back':
+            self.state = 'main'
+        elif choice == 'Quit':
+            raise SystemExit
+        else:
+            res.courses = get_course_list(choice, res)
+            print(res.courses)
+        
     def student_main_menu(self, res):
         choice = inquirer.select(
             message='Select: ',
@@ -71,15 +103,14 @@ class Menu:
         elif choice == 'Quit':
             raise SystemExit
 
-def get_course_list(category):
-    courses = []
-    if category == 'all':
+def get_course_list(category, res):
+    if category == 'All':
         # pull courses where the user has a teacher role
-        url = f'{base_url}/courses/?page=1&per_page=200'
-    elif category == 'favorites':
+        url = f'{res.w_base_url}/courses/?page=1&per_page=200'
+    elif category == 'Favorites':
         # pull only courses pinned to the users main page
-        url = f'{base_url}/users/self/favorites/courses'
-    course_json = requests.get(url, headers=header).json()
+        url = f'{res.w_base_url}/users/self/favorites/courses'
+    course_json = requests.get(url, headers=res.w_header).json()
     
     courses = [
         f'{c["id"]}:{c["name"]}:{str(c["start_at"] or "")[:10]}'
@@ -90,14 +121,19 @@ def get_course_list(category):
     courses.sort(key=lambda c: c.split(':')[1].strip())
     return courses
 
+'''
+def submit_course_id(res):
+    verified_course_code = False
+    while not verified_course_code:
+        _id = inquirer.text(
+            message='Enter course ID: ',
+            validate=numVal(),
+        ).execute()
+
+        # run a simple check against canvas to make sure its a valid code.
+        response = '''
+
 
 
 if __name__ == '__main__':
-    with open('creds/token.crd') as file:
-        token = file.read().strip()
-    base_url = 'https://hv.instructure.com/api/v1'
-    header = {"Authorization":f"Bearer {token}"}
-
-    stuff = get_course_list('favorites')
-    print(stuff)
     Menu().run(Res())
