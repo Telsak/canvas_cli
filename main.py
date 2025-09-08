@@ -41,10 +41,11 @@ class Menu:
                 self.course_main_menu(res)
             elif self.state == 'pick_course':
                 self.pick_course_menu(res)
+            elif self.state == 'submit_course_id':
+                submit_course_id(res)
+                self.state = 'course_main_menu'
             elif self.state == 'student_main_menu':
                 self.student_main_menu(res)
-            elif self.state == 'submit_course_id':
-                self.submit_course_id(res)
 
     def main_menu(self, res):
         choice = inquirer.select(
@@ -121,7 +122,6 @@ def get_course_list(category, res):
     courses.sort(key=lambda c: c.split(':')[1].strip())
     return courses
 
-'''
 def submit_course_id(res):
     verified_course_code = False
     while not verified_course_code:
@@ -131,9 +131,15 @@ def submit_course_id(res):
         ).execute()
 
         # run a simple check against canvas to make sure its a valid code.
-        response = '''
-
-
+        response = requests.get(f'{res.w_base_url}/courses/{_id}', headers=res.w_header).json()
+        if 'id' in response and int(_id) == int(response['id']):
+            res.course_id = _id
+            res.course_name = response['name']
+            res.course_date = response['created_at']
+            verified_course_code = True
+            print(f'Course selected: {res.course_name}')
+        else:
+            print('Invalid course code. Try again!\n')
 
 if __name__ == '__main__':
     Menu().run(Res())
