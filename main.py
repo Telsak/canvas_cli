@@ -22,87 +22,125 @@ def init_auth(credentials='creds/token.crd'):
 @dataclass
 class Res:
     course_id: str = ''
-    course_name: str = ''
+    course_name: str = 'Ingen vald'
     course_date: str = ''
-    courses: list = field(default_factory=list)
+    all_courses: list = field(default_factory=list)
+    favorite_courses: list = field(default_factory=list)
     w_base_url: str = 'https://hv.instructure.com/api/v1'
     w_token: str = init_auth()
     w_header = {"Authorization":f"Bearer {w_token}"}
+    term_size = os.get_terminal_size()
+    term_clear = 'cls' if os.name == 'nt' else 'clear'
 
 class Menu:
     def __init__(self):
         self.state = 'main'
 
     def run(self, res):
+        mmap = {
+            'main': self.main_menu,
+            'course_main_menu': self.course_main_menu,
+            'pick_course': self.pick_course_menu,
+            'student_main_menu': self.student_main_menu,
+            'submit_course_id': submit_course_id
+        }
+        
         while True:
-            if self.state == 'main':
-                self.main_menu(res)
-            elif self.state == 'course_main_menu':
-                self.course_main_menu(res)
-            elif self.state == 'pick_course':
-                self.pick_course_menu(res)
-            elif self.state == 'submit_course_id':
-                submit_course_id(res)
-                self.state = 'course_main_menu'
-            elif self.state == 'student_main_menu':
-                self.student_main_menu(res)
+            if self.state == 'quit': raise SystemExit
+            self.render_status(res)
+            menu_option = mmap[self.state]
+            menu_option(res)
+
+    def render_status(self, res):
+        #os.system(res.term_clear)
+        name_len = len(res.course_name)
+        cols = name_len + 8
+
+        print(f'\n╔{"═" * cols}╗')
+        print(f'║ Kurs: {res.course_name} ║')
 
     def main_menu(self, res):
+        options = ['Courses']
+        if res.course_name != 'Ingen vald':
+            options.append('Students')
+        options.append('Quit')
+        
         choice = inquirer.select(
-            message='Select: ',
-            choices=['Courses', 'Students', 'Quit'],
-            default='Courses',
+            message='Select: ', choices=options,
         ).execute()
-        if choice == 'Courses':
-            self.state = 'course_main_menu'
-        elif choice == 'Students':
-            self.state = 'student_main_menu'
-        elif choice == 'Quit':
-            raise SystemExit
+
+        mmap = {
+            'Courses': 'course_main_menu',
+            'Students': 'student_main_menu',
+            'Quit': 'quit'
+            }
+        
+        self.state = mmap[choice]
 
     def course_main_menu(self, res):
         choice = inquirer.select(
-            message='Select: ',
-            choices=['Pick course', 'Enter ID', 'Back', 'Quit'],
+            message='Select: ', choices=['Pick course', 'Enter ID', 'Back', 'Quit'],
             default='Pick course',
         ).execute()
-        if choice == 'Pick course':
-            self.state = 'pick_course'
-        elif choice == 'Enter ID':
-            self.state = 'submit_course_id'
-        elif choice == 'Back':
-            self.state = 'main'
-        elif choice == 'Quit':
-            raise SystemExit
+        
+        mmap = {
+            'Pick course': 'pick_course',
+            'Enter ID': 'submit_course_id',
+            'Back': 'main',
+            'Quit': 'quit'
+        }
+
+        self.state = mmap[choice]
         
     def pick_course_menu(self, res):
         choice = inquirer.select(
-            message='Course category: ',
-            choices=['All', 'Favorites', 'Back', 'Quit'],
+            message='Course category: ', choices=['All', 'Favorites', 'Back', 'Quit'],
             default='Favorites',
         ).execute()
+
         if choice == 'Back':
             self.state = 'main'
+            return
         elif choice == 'Quit':
             raise SystemExit
-        else:
-            res.courses = get_course_list(choice, res)
-            print(res.courses)
+        
+        courses = get_course_list(choice, res) or []
+        if not courses:
+            self.state = 'main'
+            return
+
+        choice = choice.lower()
+        choice = 'all_courses' if choice == 'all' else 'favorite_courses'
+        setattr(res, choice, list(courses))
+
+        course = inquirer.select(
+            message='Select Course: ',
+            choices=courses,
+            default=courses[0],
+        ).execute()
+        
+        res.course_id, res.course_name, res.course_date = course.split(':')
+        self.state = 'main'
         
     def student_main_menu(self, res):
+        if res.course_name == 'Ingen vald':
+            print('Kan inte välja student utan kurs!')
+            self.state = 'main'
+            return
+        
         choice = inquirer.select(
-            message='Select: ',
-            choices=['Pick student', 'Enter ID', 'Back', 'Quit'],
+            message='Select: ', choices=['Pick student', 'Enter ID', 'Back', 'Quit'],
             default='Pick student',
         ).execute()
-        if choice == 'Pick student':
-            self.state = 'pick_student'
-        elif choice == 'Enter ID':
-            self.state = 'submit_student_id'
-        elif choice == 'Back':
-            self.state = 'main'
-        elif choice == 'Quit':
-            raise SystemExit
+
+        mmap = {
+            'Pick student': 'pick_student',
+            'Enter ID': 'submit_student_id',
+            'Back': 'main',
+            'Quit': 'quit'
+        }
+        
+        self.state = mmap[choice]
 
 def get_course_list(category, res):
     if category == 'All':
