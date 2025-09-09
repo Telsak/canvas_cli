@@ -186,7 +186,7 @@ def get_course_list(category, res):
     courses.sort(key=lambda c: c.split(':')[1].strip())
     return courses
 
-def get_student_list(res, user_id='aaaa0000'):
+def get_student_list(res):
     url = f'{res.w_base_url}/courses/{res.course_id}/users?enrollment_type=student&per_page=100'
     response = requests.get(url, headers=res.w_header)
     data = response.json()
