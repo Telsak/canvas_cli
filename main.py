@@ -28,6 +28,7 @@ class Res:
     all_courses: list = field(default_factory=list)
     favorite_courses: list = field(default_factory=list)
     student_id: str = ''
+    student_login: str = ''
     student_name: str = 'Ingen vald'
     student_email: str = ''
     all_students: list = field(default_factory=list)
@@ -159,7 +160,7 @@ class Menu:
         elif choice == 'Quit':
             raise SystemExit
 
-        res.student_name, res.student_id, res.student_email = choice.split(',')
+        res.student_name, res.student_login, res.student_email, res.student_id = choice.split(',')
         print(choice)
         self.state = 'main'
         
@@ -216,8 +217,8 @@ def get_student_list(res):
     for user in data:
         last, first = user["sortable_name"].split(',')
         first = first.lstrip()
-        print(f'{first} {last},{user["login_id"]},{user["email"]}')
-        users.append(f'{first} {last},{user["login_id"]},{user["email"]}')
+        print(f'{first} {last},{user["login_id"]},{user["email"]},{user['id']}')
+        users.append(f'{first} {last},{user["login_id"]},{user["email"]},{user['id']}')
     
     return users
 
@@ -278,7 +279,12 @@ def get_student_grades(res):
     scores = {assignment['assignment_id']: assignment['score'] for assignment in response}
 
     table_headers = ['Student'] + [res.course_assignments[_id]['name'] for _id in res.course_assignments]
-    print('\t'.join(table_headers))
+    cw = [len(res.student_name) + 4]
+    for col in table_headers[1:]:
+        cw.append(len(col) + 4)
+    
+    header_line = "".join(f"{col:<{cw[i]}}" for i, col in enumerate(table_headers))
+    print(header_line)
 
     row = [res.student_name]
     for _id in res.course_assignments:
@@ -289,7 +295,7 @@ def get_student_grades(res):
             max_points = res.course_assignments[_id]['points_possible']
             row.append(f'{int(score)}/{int(max_points)}')
     
-    print('\t'.join(row))
+    print("".join(f"{cell:<{cw[i]}}" for i, cell in enumerate(row)))
     
     res.ctx = 'main'
 
