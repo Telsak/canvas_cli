@@ -7,7 +7,7 @@
 from dataclasses import dataclass, field
 from InquirerPy import inquirer
 from InquirerPy.validator import NumberValidator as numVal
-import requests, os
+import requests, os, time
 
 def init_auth(credentials='creds/token.crd'):
     try:
@@ -24,6 +24,7 @@ class Res:
     course_id: str = ''
     course_name: str = 'Ingen vald'
     course_date: str = ''
+    course_assignments: dict = field(default_factory=dict)
     all_courses: list = field(default_factory=list)
     favorite_courses: list = field(default_factory=list)
     student_id: str = ''
@@ -35,6 +36,7 @@ class Res:
     w_header = {"Authorization":f"Bearer {w_token}"}
     term_size = os.get_terminal_size()
     term_clear = 'cls' if os.name == 'nt' else 'clear'
+    ctx: str = 'main'
 
 class Menu:
     def __init__(self):
@@ -47,11 +49,17 @@ class Menu:
             'pick_course': self.pick_course_menu,
             'student_main_menu': self.student_main_menu,
             'pick_student': self.pick_student_menu,
-            'submit_course_id': submit_course_id
+            'submit_course_id': submit_course_id,
+            'submit_student_id': submit_student_id,
+            'get_student_grades': get_student_grades,
+            'get_course_assignments': get_course_assignments
         }
         
         while True:
             if self.state == 'quit': raise SystemExit
+            if res.ctx == 'main': 
+                self.state = 'main'
+                res.ctx = ''
             self.render_status(res)
             menu_option = mmap[self.state]
             menu_option(res)
@@ -62,13 +70,18 @@ class Menu:
         name_len += len(res.student_name)
         cols = name_len + 20
 
-        print(f'\n╔{"═" * cols}╗')
+        print(f'\n╓{"─" * cols}╖')
         print(f'║ Kurs: {res.course_name} ║ Student: {res.student_name} ║')
+        print(f'╙{"─" * cols}╜')
+        print(f'{"█" * (res.term_size[0] - 8)}▓▓▓▒▒░\n')
+
 
     def main_menu(self, res):
-        options = ['Courses']
+        options = ['Courses','Get course assignments']
         if res.course_name != 'Ingen vald':
             options.append('Students')
+        if res.course_name != 'Ingen vald' and res.student_name != 'Ingen vald':
+            options.append('Get student grades')
         options.append('Quit')
         
         choice = inquirer.select(
@@ -78,6 +91,8 @@ class Menu:
         mmap = {
             'Courses': 'course_main_menu',
             'Students': 'student_main_menu',
+            'Get student grades': 'get_student_grades',
+            'Get course assignments': 'get_course_assignments',
             'Quit': 'quit'
             }
         
@@ -200,29 +215,95 @@ def get_student_list(res):
     users = []
     for user in data:
         last, first = user["sortable_name"].split(',')
+        first = first.lstrip()
         print(f'{first} {last},{user["login_id"]},{user["email"]}')
         users.append(f'{first} {last},{user["login_id"]},{user["email"]}')
     
     return users
 
 def submit_course_id(res):
-    verified_course_code = False
-    while not verified_course_code:
+    verified_course_id = False
+    while not verified_course_id:
         _id = inquirer.text(
             message='Enter course ID: ',
             validate=numVal(),
         ).execute()
 
-        # run a simple check against canvas to make sure its a valid code.
+        # run a simple check against canvas to make sure its a valid course ID.
         response = requests.get(f'{res.w_base_url}/courses/{_id}', headers=res.w_header).json()
         if 'id' in response and int(_id) == int(response['id']):
             res.course_id = _id
             res.course_name = response['name']
             res.course_date = response['created_at']
-            verified_course_code = True
+            verified_course_id = True
             print(f'Course selected: {res.course_name}')
         else:
             print('Invalid course code. Try again!\n')
+
+def submit_student_id(res):
+    verified_student_id = False
+    while not verified_student_id:
+        login_id = inquirer.text(
+            message='Enter student ID: ',
+        ).execute()
+
+        # run a simple check against canvas to make sure its a valid student ID
+        url = f'{res.w_base_url}/courses/{res.course_id}/users?search_term={login_id}'
+        print(url)
+        response = requests.get(url, headers=res.w_header).json()
+        if len(response) > 0 and response[0]['login_id'] == login_id: # result on search
+            name = response[0]['sortable_name']
+            email = response[0]['email']
+            id = response[0]['id']
+            verified_student_id = True
+        else:
+            print(f'\n!! Unable to verify id: {login_id} !!\n')
+    
+    res.student_name = name
+    res.student_login = login_id
+    res.student_id = id
+    res.student_email = email
+    res.ctx = 'main'
+
+def get_student_grades(res):
+    get_course_assignments(res)
+    time.sleep(0.25)
+    url = f'{res.w_base_url}/courses/{res.course_id}/students/submissions'
+    modifiers = f'?student_ids[]={res.student_id}&response_fields[]=score&response_fields[]=assignment_id&exclude_response_fields[]=preview_url'
+
+    print(url+modifiers)
+    response = requests.get(url + modifiers, headers=res.w_header).json()
+    print(response)
+    
+    scores = {assignment['assignment_id']: assignment['score'] for assignment in response}
+
+    table_headers = ['Student'] + [res.course_assignments[_id]['name'] for _id in res.course_assignments]
+    print('\t'.join(table_headers))
+
+    row = [res.student_name]
+    for _id in res.course_assignments:
+        score = scores.get(_id, None)
+        if score is None:
+            row.append('-')
+        else:
+            max_points = res.course_assignments[_id]['points_possible']
+            row.append(f'{int(score)}/{int(max_points)}')
+    
+    print('\t'.join(row))
+    
+    res.ctx = 'main'
+
+def get_course_assignments(res):
+    res.course_assignments = {}
+    url = f'{res.w_base_url}/courses/{res.course_id}/assignments'
+    modifiers = f'?response_fields[]=id&response_fields[]=name&response_fields[]=points_possible'
+    response = requests.get(url + modifiers, headers=res.w_header).json()
+    
+    for assignment in response:
+        _id = assignment['id']
+        _name = assignment['name']
+        _points_possible = assignment['points_possible']
+        res.course_assignments[_id] = {'name': _name, 'points_possible': _points_possible}
 
 if __name__ == '__main__':
     Menu().run(Res())
