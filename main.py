@@ -22,17 +22,19 @@ def init_auth(credentials='creds/token.crd'):
 @dataclass
 class Res:
     course_id: str = ''
-    course_name: str = 'Ingen vald'
+    course_name: str = 'None'
     course_date: str = ''
     course_assignments: dict = field(default_factory=dict)
+    assignment_name: str = 'None'
+    assignment_id: str = ''
     all_courses: list = field(default_factory=list)
     favorite_courses: list = field(default_factory=list)
     student_id: str = ''
     student_login: str = ''
-    student_name: str = 'Ingen vald'
+    student_name: str = 'None'
     student_email: str = ''
     all_students: list = field(default_factory=list)
-    w_base_url: str = 'https://hv.instructure.com/api/v1'
+    w_base_url: str = 'https://hv.beta.instructure.com/api/v1'
     w_token: str = init_auth()
     w_header = {"Authorization":f"Bearer {w_token}"}
     term_size = os.get_terminal_size()
@@ -53,7 +55,8 @@ class Menu:
             'submit_course_id': submit_course_id,
             'submit_student_id': submit_student_id,
             'get_student_grades': get_student_grades,
-            'get_course_assignments': get_course_assignments
+            'get_course_assignments': get_course_assignments,
+            'pick_course_assignment': pick_course_assignment,
         }
         
         while True:
@@ -69,24 +72,31 @@ class Menu:
         #os.system(res.term_clear)
         name_len = len(res.course_name)
         name_len += len(res.student_name)
+        aname_len = len(res.assignment_name)
         cols = name_len + 20
 
         print(f'\n╓{"─" * cols}╖')
         print(f'║ Kurs: {res.course_name} ║ Student: {res.student_name} ║')
+        print(f'╟{"─" * cols}╢')
+        print(f'║ Uppgift: {res.assignment_name} {" " * (cols - aname_len - 12)} ║')
         print(f'╙{"─" * cols}╜')
+        
         print(f'{"█" * (res.term_size[0] - 8)}▓▓▓▒▒░\n')
 
 
     def main_menu(self, res):
-        options = ['Courses','Get course assignments']
-        if res.course_name != 'Ingen vald':
+        options = ['Courses',]
+        if res.course_name != 'None':
             options.append('Students')
-        if res.course_name != 'Ingen vald' and res.student_name != 'Ingen vald':
+            options.append('Get course assignments')
+        if res.course_name != 'None' and res.student_name != 'None':
             options.append('Get student grades')
+            if res.assignment_name != 'None':
+                options.append('Add student to assignment')
         options.append('Quit')
         
         choice = inquirer.select(
-            message='Select: ', choices=options,
+            message='/', choices=options,
         ).execute()
 
         mmap = {
@@ -94,6 +104,7 @@ class Menu:
             'Students': 'student_main_menu',
             'Get student grades': 'get_student_grades',
             'Get course assignments': 'get_course_assignments',
+            'Add student to assignment': 'set_student_override',
             'Quit': 'quit'
             }
         
@@ -101,7 +112,7 @@ class Menu:
 
     def course_main_menu(self, res):
         choice = inquirer.select(
-            message='Select: ', choices=['Pick course', 'Enter ID', 'Back', 'Quit'],
+            message='/courses/', choices=['Pick course', 'Enter ID', 'Back', 'Quit'],
             default='Pick course',
         ).execute()
         
@@ -116,7 +127,7 @@ class Menu:
         
     def pick_course_menu(self, res):
         choice = inquirer.select(
-            message='Course category: ', choices=['All', 'Favorites', 'Back', 'Quit'],
+            message='/courses/category/', choices=['All', 'Favorites', 'Back', 'Quit'],
             default='Favorites',
         ).execute()
 
@@ -150,8 +161,10 @@ class Menu:
             self.state = 'main'
             return
 
-        choice = inquirer.select(
-            message='Student: ', choices=users + ['Back', 'Quit'],
+        choice = inquirer.fuzzy(
+            message='Student: ', 
+            choices=users + ['Back', 'Quit'],
+            max_height="50%",
         ).execute()
 
         if choice == 'Back':
@@ -165,7 +178,7 @@ class Menu:
         self.state = 'main'
         
     def student_main_menu(self, res):
-        if res.course_name == 'Ingen vald':
+        if res.course_name == 'None':
             print('Kan inte välja student utan kurs!')
             self.state = 'main'
             return
@@ -217,7 +230,7 @@ def get_student_list(res):
     for user in data:
         last, first = user["sortable_name"].split(',')
         first = first.lstrip()
-        print(f'{first} {last},{user["login_id"]},{user["email"]},{user['id']}')
+        #print(f'{first} {last},{user["login_id"]},{user["email"]},{user['id']}')
         users.append(f'{first} {last},{user["login_id"]},{user["email"]},{user['id']}')
     
     return users
@@ -238,6 +251,7 @@ def submit_course_id(res):
             res.course_date = response['created_at']
             verified_course_id = True
             print(f'Course selected: {res.course_name}')
+            res.ctx = 'main' # go back to main
         else:
             print('Invalid course code. Try again!\n')
 
@@ -272,9 +286,9 @@ def get_student_grades(res):
     url = f'{res.w_base_url}/courses/{res.course_id}/students/submissions'
     modifiers = f'?student_ids[]={res.student_id}&response_fields[]=score&response_fields[]=assignment_id&exclude_response_fields[]=preview_url'
 
-    print(url+modifiers)
+    #print(url+modifiers)
     response = requests.get(url + modifiers, headers=res.w_header).json()
-    print(response)
+    #print(response)
     
     scores = {assignment['assignment_id']: assignment['score'] for assignment in response}
 
@@ -310,6 +324,25 @@ def get_course_assignments(res):
         _name = assignment['name']
         _points_possible = assignment['points_possible']
         res.course_assignments[_id] = {'name': _name, 'points_possible': _points_possible}
+    
+    #print(res.course_assignments)
+    #get_course_overrides(res)
+    res.ctx = 'main'
+
+def get_course_overrides(res):
+    for assignment in res.course_assignments:
+        print('Trying to get overrides!')
+        url = f"{res.w_base_url}/courses/{res.course_id}/assignments/{assignment}/overrides"
+        #response = requests.get(url, headers=res.w_header).json()
+        response = requests.get(url, headers=res.w_header)
+        input(response.text)
+
+def pick_course_assignment(res):
+    choice = inquirer.select(
+        message=f'/kurs/{res.course_name}/uppgift/ ', choices=['Pick student', 'Enter ID', 'Back', 'Quit'],
+        default='Pick student',
+    ).execute()
+
 
 if __name__ == '__main__':
     Menu().run(Res())
