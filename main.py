@@ -34,7 +34,7 @@ class Res:
     student_name: str = 'None'
     student_email: str = ''
     all_students: list = field(default_factory=list)
-    w_base_url: str = 'https://hv.beta.instructure.com/api/v1'
+    w_base_url: str = 'https://hv.instructure.com/api/v1'
     w_token: str = init_auth()
     w_header = {"Authorization":f"Bearer {w_token}"}
     term_size = os.get_terminal_size()
@@ -89,6 +89,8 @@ class Menu:
         if res.course_name != 'None':
             options.append('Students')
             options.append('Get course assignments')
+            if len(res.course_assignments) > 0:
+                options.append('Pick course assignment')
         if res.course_name != 'None' and res.student_name != 'None':
             options.append('Get student grades')
             if res.assignment_name != 'None':
@@ -104,6 +106,7 @@ class Menu:
             'Students': 'student_main_menu',
             'Get student grades': 'get_student_grades',
             'Get course assignments': 'get_course_assignments',
+            'Pick course assignment': 'pick_course_assignment',
             'Add student to assignment': 'set_student_override',
             'Quit': 'quit'
             }
@@ -132,7 +135,7 @@ class Menu:
         ).execute()
 
         if choice == 'Back':
-            self.state = 'main'
+            self.state = 'course_main_menu'
             return
         elif choice == 'Quit':
             raise SystemExit
@@ -325,7 +328,7 @@ def get_course_assignments(res):
         _points_possible = assignment['points_possible']
         res.course_assignments[_id] = {'name': _name, 'points_possible': _points_possible}
     
-    #print(res.course_assignments)
+    print(res.course_assignments)
     #get_course_overrides(res)
     res.ctx = 'main'
 
@@ -338,11 +341,16 @@ def get_course_overrides(res):
         input(response.text)
 
 def pick_course_assignment(res):
+    options = []
+    for key, val in res.course_assignments.items():
+        options.append(f'{val["name"]},{key}')
+    options += ['Back', 'Quit']
     choice = inquirer.select(
-        message=f'/kurs/{res.course_name}/uppgift/ ', choices=['Pick student', 'Enter ID', 'Back', 'Quit'],
-        default='Pick student',
+        message=f'/kurs/{res.course_name}/uppgift/', choices=options,
     ).execute()
 
+    res.assignment_name, res.assignment_id = choice.split(',')
+    
 
 if __name__ == '__main__':
     Menu().run(Res())
