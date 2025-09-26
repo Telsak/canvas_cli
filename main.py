@@ -52,17 +52,19 @@ class Menu:
             'pick_course': self.pick_course_menu,
             'student_main_menu': self.student_main_menu,
             'pick_student': self.pick_student_menu,
+            'assignment_main_menu': self.assignment_main_menu,
             'submit_course_id': submit_course_id,
             'submit_student_id': submit_student_id,
             'get_student_grades': get_student_grades,
             'get_course_assignments': get_course_assignments,
             'pick_course_assignment': pick_course_assignment,
+            'update_assignment_override': update_assignment_override,
         }
         
         while True:
             if self.state == 'quit': raise SystemExit
-            if res.ctx == 'main': 
-                self.state = 'main'
+            if res.ctx != '': 
+                self.state = res.ctx
                 res.ctx = ''
             self.render_status(res)
             menu_option = mmap[self.state]
@@ -88,13 +90,12 @@ class Menu:
         options = ['Courses',]
         if res.course_name != 'None':
             options.append('Students')
-            options.append('Get course assignments')
-            if len(res.course_assignments) > 0:
-                options.append('Pick course assignment')
+            options.append('Assignments')
         if res.course_name != 'None' and res.student_name != 'None':
             options.append('Get student grades')
             if res.assignment_name != 'None':
                 options.append('Add student to assignment')
+                options.append('update override')
         options.append('Quit')
         
         choice = inquirer.select(
@@ -104,10 +105,12 @@ class Menu:
         mmap = {
             'Courses': 'course_main_menu',
             'Students': 'student_main_menu',
+            'Assignments': 'assignment_main_menu',
             'Get student grades': 'get_student_grades',
             'Get course assignments': 'get_course_assignments',
             'Pick course assignment': 'pick_course_assignment',
             'Add student to assignment': 'set_student_override',
+            'update override': 'update_assignment_override',
             'Quit': 'quit'
             }
         
@@ -115,7 +118,7 @@ class Menu:
 
     def course_main_menu(self, res):
         choice = inquirer.select(
-            message='/courses/', choices=['Pick course', 'Enter ID', 'Back', 'Quit'],
+            message='/course/>', choices=['Pick course', 'Enter ID', 'Back', 'Quit'],
             default='Pick course',
         ).execute()
         
@@ -127,10 +130,28 @@ class Menu:
         }
 
         self.state = mmap[choice]
+    
+    def assignment_main_menu(self, res):
+        choices = ['Get course assignments']
+        if len(res.course_assignments) > 0:
+            choices.append('Pick assignment')
+        choice = inquirer.select(
+            message = f'/course/{res.course_name}/assignment/>', choices=choices + ['Back'],
+            default='Get course assignments',
+        ).execute()
+
+        mmap = {
+            'Get course assignments': 'get_course_assignments',
+            'Pick assignment': 'pick_course_assignment',
+            'Back': 'main',
+            'Quit': 'quit'
+        }
+
+        self.state = mmap[choice]
         
     def pick_course_menu(self, res):
         choice = inquirer.select(
-            message='/courses/category/', choices=['All', 'Favorites', 'Back', 'Quit'],
+            message='/courses/category/>', choices=['All', 'Favorites', 'Back', 'Quit'],
             default='Favorites',
         ).execute()
 
@@ -165,7 +186,7 @@ class Menu:
             return
 
         choice = inquirer.fuzzy(
-            message='Student: ', 
+            message='/student/search/>', 
             choices=users + ['Back', 'Quit'],
             max_height="50%",
         ).execute()
@@ -181,13 +202,8 @@ class Menu:
         self.state = 'main'
         
     def student_main_menu(self, res):
-        if res.course_name == 'None':
-            print('Kan inte välja student utan kurs!')
-            self.state = 'main'
-            return
-        
         choice = inquirer.select(
-            message='Select: ', choices=['Pick student', 'Enter ID', 'Back', 'Quit'],
+            message='/students/>', choices=['Pick student', 'Enter ID', 'Back', 'Quit'],
             default='Pick student',
         ).execute()
 
@@ -330,15 +346,39 @@ def get_course_assignments(res):
     
     print(res.course_assignments)
     #get_course_overrides(res)
-    res.ctx = 'main'
+    res.ctx = 'assignment_main_menu'
 
 def get_course_overrides(res):
     for assignment in res.course_assignments:
         print('Trying to get overrides!')
-        url = f"{res.w_base_url}/courses/{res.course_id}/assignments/{assignment}/overrides"
+        url = f'{res.w_base_url}/courses/{res.course_id}/assignments/{assignment}/overrides'
         #response = requests.get(url, headers=res.w_header).json()
         response = requests.get(url, headers=res.w_header)
-        input(response.text)
+
+def update_assignment_override(res):
+    # first we need to get the assignment information since the update is a PUT operation
+    # and we cannot remove existing students that already are listed on the assignment either
+    print('Trying to get override!')
+    url = f'{res.w_base_url}/courses/{res.course_id}/assignments/{res.assignment_id}/overrides'
+    response = requests.get(url, headers=res.w_header).json()[0]
+    override_id = response['id']
+    student_ids = response['student_ids']
+
+    print(f'Adding {res.student_name} to override for {res.assignment_name}.')
+    reply = input('Are you sure? (y/n) ')
+    if reply.lower() == 'y':
+        if res.student_id in student_ids:
+            print('Student already in override!')
+            res.ctx = 'main'
+            return
+        
+        student_ids.append(res.student_id)
+        payload = {'assignment_override[student_ids][]': student_ids}
+
+        put_url = f'{res.w_base_url}/courses/{res.course_id}/assignments/{res.assignment_id}/overrides/{override_id}'
+        update_response = requests.put(put_url, headers=res.w_header, data=payload).json()
+        print(update_response)
+    res.ctx = 'main'
 
 def pick_course_assignment(res):
     options = []
@@ -349,7 +389,10 @@ def pick_course_assignment(res):
         message=f'/kurs/{res.course_name}/uppgift/', choices=options,
     ).execute()
 
-    res.assignment_name, res.assignment_id = choice.split(',')
+    if choice not in ['Back', 'Quit']:
+        res.assignment_name, res.assignment_id = choice.split(',')
+        print(res)
+    res.ctx = 'main'
     
 
 if __name__ == '__main__':
